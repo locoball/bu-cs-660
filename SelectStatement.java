@@ -59,6 +59,40 @@ public class SelectStatement extends SQLStatement {
     }
     
     public void execute() throws DatabaseException, DeadlockException {
-        /* not yet implemented */
+        try {
+            if (!isSupported())
+                throw new RuntimeException("Not Supported!");
+
+            Table table = this.getTable(0);
+
+            // open it first
+            if (table.open() != OperationStatus.SUCCESS)
+                throw new RuntimeException("Table not opened or not existed!");
+
+            // create cursor
+            TableIterator it = new TableIterator(this, table, true);
+
+            // print all
+            it.printAll(System.out);
+
+            // close it
+            it.close();
+
+        } catch (Exception e) {
+            String errMsg = e.getMessage();
+            if (errMsg != null)
+                System.err.println(errMsg + ".");
+            System.err.println("Failed.");
+            e.printStackTrace();
+        }
+    }
+
+    protected boolean isSupported() {
+        if (this.numTables() != 1)
+            return false;
+        if (this.numColumns() != 0)
+            return false;
+
+        return true;
     }
 }

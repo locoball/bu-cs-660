@@ -8,6 +8,8 @@ import java.io.*;
 import com.sleepycat.db.*;
 import com.sleepycat.bind.tuple.*;
 
+import javax.xml.bind.DatatypeConverter;
+
 /**
  * A class that serves as an iterator over some or all of the rows in
  * a stored table.  For a given table, there may be more than one
@@ -149,8 +151,20 @@ public class TableIterator extends RelationIterator {
      *         while accessing the underlying database(s)
      */
     public boolean next() throws DeadlockException, DatabaseException {
-        /* not yet implemented */
-        return false;
+        
+        if (this.cursor == null)
+            throw new IllegalStateException("this iterator has been closed");
+
+        OperationStatus ret = this.cursor.getNext(this.key, this.data, null);
+
+        if (ret != OperationStatus.SUCCESS)
+            return false;
+
+        if (!this.where.isTrue())
+            return next();
+
+        this.numTuples++;
+        return true;
     }
     
     /**
@@ -181,8 +195,85 @@ public class TableIterator extends RelationIterator {
      * @throws  IndexOutOfBoundsException if the specified index is invalid
      */
     public Object getColumnVal(int colIndex) {
-        /* not yet implemented */
-        return null;
+            
+        // SEE InsertRow FOR MARSHALLING PROTOCOL
+        boolean hasPK = table.primaryKeyColumn() == null ? false : true;
+        Column coldef = table.getColumn(colIndex);
+        int type = coldef.getType();
+        int length = coldef.getLength();
+        Object retval = null;
+        TupleInput tuple = null;
+        boolean isPK = false;
+
+        if (DBMS.DEBUG) {
+            System.out.println("");
+            System.out.println("Key: " + DatatypeConverter.printHexBinary(this.key.getData()));
+            System.out.println("Data:" + DatatypeConverter.printHexBinary(this.data.getData()));
+        }
+
+        //
+        if (!hasPK) {
+            tuple = new TupleInput(this.data.getData());
+            tuple.mark(0);
+            
+            // jump to the offset of that column
+            tuple.skip(colIndex * 2);
+            int offset = tuple.readUnsignedShort();
+            length = tuple.readUnsignedShort() - offset;
+
+            // jump to the column
+            tuple.reset();
+            tuple.skip(offset);
+
+        // if it is the key
+        } else if (coldef.isPrimaryKey()) {
+            tuple = new TupleInput(this.key.getData());
+            isPK = true;
+
+        // if it is not the key
+        } else {
+            int index = colIndex > this.table.primaryKeyColumn().getIndex() ? colIndex - 1 : colIndex;
+
+            tuple = new TupleInput(this.data.getData());
+            tuple.mark(0);
+            
+            // jump to the offset of that column
+            tuple.skip(index * 2);
+            int offset = tuple.readUnsignedShort();
+            length = tuple.readUnsignedShort() - offset;
+
+            // jump to the column
+            tuple.reset();
+            tuple.skip(offset);
+        }
+
+        // read
+        retval = doRead(type, length, isPK, tuple);
+
+        return retval;
+    }
+
+    protected Object doRead(int type, int length, boolean isPK, TupleInput tuple) {
+        Object retval = null;
+
+        if (DBMS.DEBUG) {
+            System.out.println();
+            System.out.println("Offset:" + tuple.getBufferOffset());
+            System.out.println("Length:" + length);
+        }
+
+        if (type == Column.VARCHAR) 
+            retval = isPK ? tuple.readBytes(tuple.readUnsignedShort()) : tuple.readBytes(length);
+        else if (type == Column.INTEGER) 
+            retval = new Integer(tuple.readInt());
+        else if (type == Column.REAL) 
+            retval = new Double(tuple.readDouble());
+        else if (type == Column.CHAR)
+            retval = tuple.readBytes(length);
+        else
+            throw new RuntimeException("getColumnVal");
+
+        return retval;
     }
     
     /**

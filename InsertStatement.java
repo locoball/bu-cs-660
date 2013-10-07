@@ -56,7 +56,13 @@ public class InsertStatement extends SQLStatement {
             
             /* Add code below to perform the actual insertion. */
 
-            
+            if (row.getKey() == null)
+                table.getDB().append(DBMS.getTxn(), new DatabaseEntry(), row.getData());
+            else {
+                OperationStatus ret = table.getDB().putNoOverwrite(DBMS.getTxn(), row.getKey(), row.getData());
+                if (ret == OperationStatus.KEYEXIST)
+                    throw new RuntimeException("Key Exists.");
+            }
             
             
         } catch (Exception e) {
