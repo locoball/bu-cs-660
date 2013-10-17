@@ -204,6 +204,11 @@ public class TableIterator extends RelationIterator {
         Object retval = null;
         TupleInput tuple = null;
         boolean isPK = false;
+        int offsetsLength = hasPK ? table.numColumns() : table.numColumns() + 1;
+
+        // get bitmap
+        TupleInput bitmapTuple = new TupleInput(this.data.getData());
+        int bitmap = (int)bitmapTuple.readUnsignedInt();
 
         if (DBMS.DEBUG) {
             System.out.println("");
@@ -214,12 +219,21 @@ public class TableIterator extends RelationIterator {
         //
         if (!hasPK) {
             tuple = new TupleInput(this.data.getData());
+            tuple.skip(4);
             tuple.mark(0);
             
+            // is null
+            if (isNull(bitmap, colIndex)) {
+                if (DBMS.DEBUG)
+                    System.out.println("NULL");
+                return null;
+            }
+
             // jump to the offset of that column
             tuple.skip(colIndex * 2);
             int offset = tuple.readUnsignedShort();
-            length = tuple.readUnsignedShort() - offset;
+            int nextOffset = tuple.readUnsignedShort();
+            length = nextOffset - offset;
 
             // jump to the column
             tuple.reset();
@@ -235,12 +249,21 @@ public class TableIterator extends RelationIterator {
             int index = colIndex > this.table.primaryKeyColumn().getIndex() ? colIndex - 1 : colIndex;
 
             tuple = new TupleInput(this.data.getData());
+            tuple.skip(4);
             tuple.mark(0);
+
+
+            if (isNull(bitmap, colIndex)) {
+                if (DBMS.DEBUG)
+                    System.out.println("NULL");
+                return null;
+            }
             
             // jump to the offset of that column
             tuple.skip(index * 2);
             int offset = tuple.readUnsignedShort();
-            length = tuple.readUnsignedShort() - offset;
+            int nextOffset = tuple.readUnsignedShort();
+            length = nextOffset - offset;
 
             // jump to the column
             tuple.reset();
@@ -251,6 +274,12 @@ public class TableIterator extends RelationIterator {
         retval = doRead(type, length, isPK, tuple);
 
         return retval;
+    }
+
+    protected boolean isNull(int bitmap, int offsetIndex) {
+        while (offsetIndex-- > 0)
+            bitmap = bitmap >> 1;
+        return (bitmap & 1) != 0;
     }
 
     protected Object doRead(int type, int length, boolean isPK, TupleInput tuple) {
@@ -265,7 +294,7 @@ public class TableIterator extends RelationIterator {
         if (type == Column.VARCHAR) 
             retval = isPK ? tuple.readBytes(tuple.readUnsignedShort()) : tuple.readBytes(length);
         else if (type == Column.INTEGER) 
-            retval = new Integer(tuple.readInt());
+            retval = new Integer((int)tuple.readUnsignedInt());
         else if (type == Column.REAL) 
             retval = new Double(tuple.readDouble());
         else if (type == Column.CHAR)

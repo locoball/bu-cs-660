@@ -47,7 +47,7 @@ public class InsertRow {
         /*
             FORMAT:
 
-            offset headers, 2 bytes * (numOfNonPKColumns + 1)
+            null bitmap, offset headers, 2 bytes * (numOfNonPKColumns + 1)
             colVals
 
             FORMAT PK:
@@ -57,6 +57,7 @@ public class InsertRow {
                 CONTENT
             if non-varchar
                 CONTENT
+
         */
         
         TupleOutput keyTuple = new TupleOutput();
@@ -68,6 +69,7 @@ public class InsertRow {
         int[] offsets = new int[hasPK ? numOfColumns: numOfColumns + 1];
 
         // write primary key
+        // PK can't be null
         if (hasPK) {
             Column pk = table.primaryKeyColumn();
             int type = pk.getType();
@@ -100,13 +102,23 @@ public class InsertRow {
             if (currentCol.isPrimaryKey()) 
                 continue;
 
-            if (currentCol.getType() == Column.VARCHAR)
+            // null
+            if (values[i] == null) 
+                offsets[pivot + 1] = offsets[pivot];
+
+            // not null
+            else if (currentCol.getType() == Column.VARCHAR) 
                 offsets[pivot + 1] = offsets[pivot] + ((String)values[i]).length();
             else
                 offsets[pivot + 1] = offsets[pivot] + currentCol.getLength();
 
             pivot++;
         }
+
+        // write null bitmap
+        int pkIndex = hasPK ? table.primaryKeyColumn().getIndex() : -1;
+        int bitmap = getNullBitmap(values, pkIndex);
+        dataTuple.writeUnsignedInt(bitmap);
 
         // write offset as 2-byte arrays
         for (int i = 0; i < offsets.length; i++)
@@ -121,12 +133,16 @@ public class InsertRow {
             if (currentCol.isPrimaryKey()) 
                 continue;
 
+            // skip null
+            if (values[i] == null)
+                continue;
+
             int type = currentCol.getType();
 
             if (type == Column.VARCHAR)
                 dataTuple.writeBytes((String)values[i]);
             else if (type == Column.INTEGER)
-                dataTuple.writeInt(((Integer)values[i]).intValue());
+                dataTuple.writeUnsignedInt(((Integer)values[i]).intValue());
             else if (type == Column.REAL)
                 dataTuple.writeDouble(((Double)values[i]).doubleValue());
             else if (type == Column.CHAR)
@@ -138,6 +154,32 @@ public class InsertRow {
         this.data = new DatabaseEntry(dataTuple.getBufferBytes(), 0, dataTuple.getBufferLength());
         if (hasPK)
             this.key = new DatabaseEntry(keyTuple.getBufferBytes(), 0, keyTuple.getBufferLength());
+    }
+
+
+    protected int getNullBitmap(Object[] values, int pkIndex) {
+        int bitmap = 0;
+        int pivot = 0;
+
+        for (int i = 0; i < values.length; i++) {
+            if (pkIndex == i)
+                continue;
+
+            int offset = pivot;
+            int val = 1;
+            while (offset-- > 0)
+                val = val << 1;
+
+            if (values[i] == null) 
+                bitmap = bitmap | val;
+
+            pivot++;
+        }
+
+        if (DBMS.DEBUG)
+            System.out.println(bitmap);
+
+        return bitmap;
     }
 
 
