@@ -6,7 +6,7 @@
 
 import java.io.*;
 import com.sleepycat.db.*;
-
+import java.util.*;
 /**
  * A class that serves as an iterator over some or all of the tuples
  * in the cross product (i.e., Cartesian product) of two or more
@@ -17,6 +17,7 @@ public class CrossIterator extends RelationIterator {
     private Column[] columns;
     private ConditionalExpression where;
     private int numTuples;
+    private boolean firstChecked = false;
     
     /**
      * Constructs a CrossIterator object for the subset of the cross
@@ -31,7 +32,38 @@ public class CrossIterator extends RelationIterator {
      *         while accessing one of the underlying database(s)
      */
     public CrossIterator(SQLStatement stmt) throws DatabaseException {
-        /* not yet implemented */
+        
+        // open all the iterators for tables
+        // record all columns
+        List<TableIterator> its = new ArrayList<TableIterator>();
+        List<Column> cols = new ArrayList<Column>();
+        int numTables = stmt.numTables();
+
+        for (int i = 0; i < numTables; i++) {
+            Table table = stmt.getTable(i);
+            TableIterator it = new TableIterator(stmt, table, false);
+            its.add(it);
+
+            int numCols = table.numColumns();
+            for (int j = 0; j < numCols; j++) {
+                Column col = table.getColumn(j);
+                col.setTableIterator(it);
+                cols.add(col);
+            }
+        }
+
+        this.tableIter = its.toArray(new TableIterator[its.size()]);
+        this.columns = cols.toArray(new Column[cols.size()]);
+
+        // store WHERE
+        this.where = stmt.getWhere();
+        if (this.where == null)
+            this.where = new TrueExpression();
+
+        // init numTuples
+        this.numTuples = 0;
+
+        this.initFirst();
     }
     
     /**
@@ -41,7 +73,9 @@ public class CrossIterator extends RelationIterator {
      *         while closing a handle
      */
     public void close() throws DatabaseException {
-        /* not yet implemented */
+        for (TableIterator it : this.tableIter) {
+            it.close();
+        }
     }
     
     /**
@@ -60,8 +94,48 @@ public class CrossIterator extends RelationIterator {
      *         while accessing the underlying database(s)
      */
     public boolean next() throws DeadlockException, DatabaseException {
-        /* not yet implemented */
-        return false;
+
+        if (!this.firstChecked) {
+            this.firstChecked = true;
+            if (this.where.isTrue()) {
+                numTuples++;
+                return true;
+            }
+            
+        }
+
+        int pivot = this.tableIter.length - 1;
+
+        while (pivot >= 0 && !advance(pivot))
+            pivot--;
+
+        if (pivot < 0)
+            return false;
+        
+        if (!this.where.isTrue())
+            return next();
+
+        this.numTuples++;
+        return true;
+    }
+
+
+    protected void initFirst() throws DeadlockException, DatabaseException {
+        for (TableIterator it : this.tableIter) {
+            it.first();
+        }
+    }
+
+
+    protected boolean advance(int index) throws DeadlockException, DatabaseException {
+
+        TableIterator it = this.tableIter[index];
+        if (it.next())
+            return true;
+        else {
+            it.first();
+            return false;
+        }
     }
     
     /**
@@ -72,8 +146,7 @@ public class CrossIterator extends RelationIterator {
      * @throws  IndexOutOfBoundsException if the specified index is invalid
      */
     public Column getColumn(int colIndex) {
-        /* not yet implemented */
-        return null;
+        return this.columns[colIndex];
     }
     
     /**
@@ -93,8 +166,8 @@ public class CrossIterator extends RelationIterator {
      * @throws  IndexOutOfBoundsException if the specified index is invalid
      */
     public Object getColumnVal(int colIndex) {
-        /* not yet implemented */
-        return null;
+        Column col = this.columns[colIndex];
+        return col.getValue();
     }
     
     public int numColumns() {

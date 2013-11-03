@@ -5,7 +5,8 @@
  */
 
 import com.sleepycat.db.*;
-
+import java.util.*;
+import java.lang.StringBuilder;
 /**
  * A class that serves as an iterator over some or all of the tuples
  * in a relation that results from performing a projection on an 
@@ -17,6 +18,8 @@ public class ProjectionIterator extends RelationIterator {
     private RelationIterator subrel;
     private boolean checkDistinct;
     private int numTuples;
+
+    private Set<String> visited;
     
     /**
      * Constructs a ProjectionIterator object for the relation formed by
@@ -29,7 +32,21 @@ public class ProjectionIterator extends RelationIterator {
      * @throws IllegalStateException if subrel is null
      */
     public ProjectionIterator(SQLStatement stmt, RelationIterator subrel) {
-        /* not yet implemented */
+        this.subrel = subrel;
+        this.numTuples = 0;
+        this.columns = new Column[stmt.numColumns()];
+
+        for (int i = 0; i < stmt.numColumns(); i++) {
+            this.columns[i] = stmt.getColumn(i);
+        }
+
+        if (stmt instanceof SelectStatement) 
+            this.checkDistinct = ((SelectStatement)stmt).distinctSpecified();
+        else
+            this.checkDistinct = false;
+
+        this.visited = new HashSet<String>();
+
     }
     
     /**
@@ -39,7 +56,7 @@ public class ProjectionIterator extends RelationIterator {
      *         while closing a handle
      */
     public void close() throws DatabaseException {
-        /* not yet implemented */
+        this.subrel.close();
     }
     
     /**
@@ -58,8 +75,26 @@ public class ProjectionIterator extends RelationIterator {
      *         while accessing the underlying database(s)
      */
     public boolean next() throws DatabaseException, DeadlockException {
-        /* not yet implemented */
+        boolean ret = this.subrel.next();
+        String hash = this.hashCurrent();
+        boolean count = this.checkDistinct ? !this.visited.contains(hash) : true;
+        if (ret && count) {
+            this.numTuples++;
+            this.visited.add(hash);
+            return true;
+        } else if (ret && !count) 
+            return next();
+        
+
         return false;
+    }
+
+    protected String hashCurrent() {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < this.numColumns(); i++) {
+            builder.append(this.getColumnVal(i)).append("|");
+        }
+        return builder.toString();
     }
     
     /**
@@ -70,8 +105,7 @@ public class ProjectionIterator extends RelationIterator {
      * @throws  IndexOutOfBoundsException if the specified index is invalid
      */
     public Column getColumn(int colIndex) {
-        /* not yet implemented */
-        return null;
+        return this.columns[colIndex];
     }
     
     /**
@@ -91,8 +125,9 @@ public class ProjectionIterator extends RelationIterator {
      * @throws  IndexOutOfBoundsException if the specified index is invalid
      */
     public Object getColumnVal(int colIndex) {
-        /* not yet implemented */
-        return null;
+        Column col = this.columns[colIndex];
+
+        return col.getValue();
     }
     
     public int numColumns() {

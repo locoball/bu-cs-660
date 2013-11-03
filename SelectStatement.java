@@ -47,6 +47,7 @@ public class SelectStatement extends SQLStatement {
             if (selectItem instanceof Column)
                 this.addColumn((Column)selectItem);
         }
+
     }
     
     /**
@@ -62,21 +63,35 @@ public class SelectStatement extends SQLStatement {
         try {
             if (!isSupported())
                 throw new RuntimeException("Not Supported!");
+     
+            for (int i = 0; i < this.numTables(); i++) {
+                Table table = this.getTable(i);
 
-            Table table = this.getTable(0);
+                // open it first
+                if (table.open() != OperationStatus.SUCCESS)
+                    throw new RuntimeException("Table not opened or not existed!");
+            }
 
-            // open it first
-            if (table.open() != OperationStatus.SUCCESS)
-                throw new RuntimeException("Table not opened or not existed!");
+            if (isWhereValid() == false)
+                throw new RuntimeException("Where clause is not valid!");
+
 
             // create cursor
-            TableIterator it = new TableIterator(this, table, true);
+            RelationIterator it;
+            if (this.numTables() == 1)
+                it = new TableIterator(this, this.getTable(0), true);
+            else
+                it = new CrossIterator(this);
 
-            // print all
-            it.printAll(System.out);
-
-            // close it
-            it.close();
+            if (this.numColumns() == 0) {
+                it.printAll(System.out);
+                it.close();
+            } else {
+                // prepare for projection
+                RelationIterator pit = new ProjectionIterator(this, it);
+                pit.printAll(System.out);
+                pit.close();
+            }
 
         } catch (Exception e) {
             String errMsg = e.getMessage();
@@ -87,12 +102,34 @@ public class SelectStatement extends SQLStatement {
         }
     }
 
-    protected boolean isSupported() {
-        if (this.numTables() != 1)
-            return false;
-        if (this.numColumns() != 0)
-            return false;
+    protected boolean isWhereValid() {
+        for (int i = 0; i < this.numWhereColumns(); i++) {
+            Column c = this.getWhereColumn(i);
+            if (this.getColumnByName(c, c.getTable()) == null)
+                return false;
+        }
+        return true;
+    }
 
+    protected Column getColumnByName(Column other, Table table) {
+        for (int i = 0; i < this.numTables(); i++) {
+           
+            Table t = this.getTable(i);
+           
+            for (int j = 0; j < t.numColumns(); j++) {
+                Column c = t.getColumn(j);
+
+                if (c.nameMatches(other, table))
+                    return c;
+            }
+        }
+        return null;
+    }
+
+
+    protected boolean isSupported() {
+        if (this.numTables() == 0)
+            return false;
         return true;
     }
 }
